@@ -85,9 +85,17 @@ function collectCandidates(chunks: LoadedChunk[]): Map<string, Candidate> {
     // Match per sentence, otherwise a capitalised word after a full stop gets
     // glued onto the previous phrase ("Doha. All treasury").
     for (const sentence of chunk.text.split(/(?<=[.!?])\s+|\n+/)) {
+      const opening = sentence.replace(/^[^\p{L}\p{N}]+/u, "");
       for (const match of sentence.matchAll(ENTITY_PATTERN)) {
         const phrase = trimEntity(match[0]);
-        if (phrase) addCandidate(map, phrase, "entity", chunk);
+        if (!phrase) continue;
+        // A single capitalised word that only ever opens a sentence is just
+        // ordinary prose ("Speed within the building..."), not a name.
+        const sentenceInitial = opening.startsWith(match[0]);
+        if (sentenceInitial && !phrase.includes(" ") && !/^[\p{Lu}]{2,}$/u.test(phrase)) {
+          continue;
+        }
+        addCandidate(map, phrase, "entity", chunk);
       }
     }
     if (chunk.heading) {

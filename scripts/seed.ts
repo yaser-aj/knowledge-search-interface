@@ -3,9 +3,11 @@ import path from "node:path";
 
 import { ingestDocument } from "@/lib/ingest";
 import { isSupported } from "@/lib/parse";
-import { corpusStats } from "@/lib/store";
+import { corpusStats, deleteDocument, listDocuments } from "@/lib/store";
 
-const directory = path.resolve(process.argv[2] ?? "fixtures");
+const args = process.argv.slice(2);
+const replace = args.includes("--replace");
+const directory = path.resolve(args.find((arg) => !arg.startsWith("--")) ?? "fixtures");
 const entries = (await readdir(directory)).filter(isSupported).sort();
 
 if (entries.length === 0) {
@@ -16,6 +18,15 @@ if (entries.length === 0) {
 console.log(`Indexing ${entries.length} document(s) from ${directory}\n`);
 
 for (const filename of entries) {
+  const existing = listDocuments().filter((document) => document.filename === filename);
+  if (existing.length > 0) {
+    if (!replace) {
+      console.log(`  --  ${filename} — already indexed, skipping (pass --replace to reindex)`);
+      continue;
+    }
+    for (const document of existing) await deleteDocument(document.id);
+  }
+
   const buffer = await readFile(path.join(directory, filename));
   const started = Date.now();
   const record = await ingestDocument({ filename, buffer });

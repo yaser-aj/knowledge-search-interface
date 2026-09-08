@@ -10,6 +10,11 @@ const STOPWORDS = new Set([
   "through", "to", "too", "under", "until", "up", "very", "was", "we", "were", "what", "when",
   "where", "which", "while", "who", "whom", "why", "will", "with", "would", "you", "your",
   "yours",
+  // Function words that otherwise dominate policy and contract prose.
+  "must", "may", "shall", "might", "could", "within", "upon", "per", "via", "whether",
+  "however", "therefore", "including", "include", "made", "make", "remains", "remain",
+  "held", "hold", "every", "either", "neither", "another", "across", "among", "toward",
+  "towards", "without", "against", "along", "around", "behind", "beyond", "beside",
 ]);
 
 export function isStopword(word: string): boolean {

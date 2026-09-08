@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -29,6 +29,8 @@ interface StoreCache {
   corpus: Corpus | null;
   /** Bumped on every mutation so derived indexes know to rebuild. */
   version: number;
+  /** mtime of index.json when it was last read, to spot out-of-band writes. */
+  indexMtimeMs: number;
   writeQueue: Promise<unknown>;
 }
 
@@ -37,8 +39,17 @@ const globalCache = globalThis as unknown as { __ksiStore?: StoreCache };
 const cache: StoreCache = (globalCache.__ksiStore ??= {
   corpus: null,
   version: 0,
+  indexMtimeMs: 0,
   writeQueue: Promise.resolve(),
 });
+
+function indexMtime(): number {
+  try {
+    return statSync(paths.index).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
 
 /** Serialises writes so two concurrent uploads cannot clobber index.json. */
 function withWriteLock<T>(task: () => Promise<T>): Promise<T> {
@@ -52,6 +63,7 @@ async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
   await mkdir(path.dirname(file), { recursive: true });
   await writeFile(temp, JSON.stringify(value), "utf8");
   await rename(temp, file);
+  if (file === paths.index) cache.indexMtimeMs = indexMtime();
 }
 
 function readJson<T>(file: string, fallback: T): T {
@@ -103,6 +115,7 @@ function hydrate(chunk: Chunk, filename: string, vector: Float32Array): LoadedCh
 
 function loadCorpus(): Corpus {
   ensureDataDirs();
+  cache.indexMtimeMs = indexMtime();
   const documents = readJson<DocumentRecord[]>(paths.index, []);
   const chunks: LoadedChunk[] = [];
 
@@ -129,6 +142,12 @@ function loadCorpus(): Corpus {
 }
 
 export function getCorpus(): Corpus {
+  // `npm run seed` writes the index from another process; pick that up instead
+  // of serving a stale in-memory copy.
+  if (cache.corpus && indexMtime() !== cache.indexMtimeMs) {
+    cache.corpus = null;
+    cache.version += 1;
+  }
   cache.corpus ??= loadCorpus();
   return cache.corpus;
 }
@@ -215,7 +234,15 @@ export function saveDocumentChunks(
 export function saveVocabulary(terms: LoadedVocabTerm[]): Promise<void> {
   return withWriteLock(async () => {
     ensureDataDirs();
-    const plain: VocabTerm[] = terms.map(({ vector: _vector, ...rest }) => rest);
+    const plain: VocabTerm[] = terms.map((term) => ({
+      key: term.key,
+      term: term.term,
+      kind: term.kind,
+      documentFrequency: term.documentFrequency,
+      occurrences: term.occurrences,
+      documentIds: term.documentIds,
+      chunkIds: term.chunkIds,
+    }));
     await writeJsonAtomic(paths.vocabIndex, plain);
     await writeFile(paths.vocabVectors, packVectors(terms.map((t) => t.vector)));
     getCorpus().vocab = terms;
