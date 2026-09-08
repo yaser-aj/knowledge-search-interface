@@ -7,7 +7,11 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "seed": "node --import ./scripts/register.mjs scripts/seed.ts"
+    "seed": "node --import ./scripts/register.mjs scripts/seed.ts",
+    "check:embeddings": "node --import ./scripts/register.mjs scripts/check-embeddings.ts",
+    "check:retrieval": "node --import ./scripts/register.mjs scripts/check-retrieval.ts",
+    "check:planner": "node --import ./scripts/register.mjs scripts/check-planner.ts",
+    "check:json": "node --import ./scripts/register.mjs scripts/check-json-repair.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",

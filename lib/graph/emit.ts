@@ -1,10 +1,21 @@
 import { getWriter, type LangGraphRunnableConfig } from "@langchain/langgraph";
 
+import type { LlmUsage } from "../llm";
 import type { AskEvent, StageName, StageStatus } from "../types";
 
 /** Pushes a typed event onto LangGraph's "custom" stream for the SSE route. */
 export function emit(config: LangGraphRunnableConfig, event: AskEvent): void {
   getWriter(config)?.(event);
+}
+
+export function emitUsage(config: LangGraphRunnableConfig, usage: LlmUsage): void {
+  emit(config, {
+    type: "usage",
+    llmCalls: usage.calls,
+    models: usage.models,
+    degraded: usage.degraded,
+    notes: [...usage.notes],
+  });
 }
 
 export function emitStage(

@@ -9,7 +9,7 @@ import type {
   Verdict,
   Verification,
 } from "../types";
-import { emit, withStage } from "./emit";
+import { emit, emitUsage, withStage } from "./emit";
 import { formatSources } from "./write";
 import type { AskStateType } from "./state";
 
@@ -174,7 +174,7 @@ async function llmVerification(
     system: SYSTEM_PROMPT,
     user: buildUserPrompt(state),
     usage,
-    maxTokens: 1200,
+    maxTokens: 1800,
     label: "verify",
   });
 
@@ -246,16 +246,12 @@ export async function verifyNode(
     }
 
     if (!verification) {
+      usage.degraded = true;
       verification = heuristicVerification(state);
     }
 
     emit(config, { type: "verification", verification });
-    emit(config, {
-      type: "usage",
-      llmCalls: usage.calls,
-      models: usage.models,
-      degraded: usage.degraded,
-    });
+    emitUsage(config, usage);
     return { verification, usage };
   });
 }

@@ -175,6 +175,13 @@ export type AskEvent =
   | { type: "token"; text: string }
   | { type: "answer"; text: string }
   | { type: "verification"; verification: Verification }
-  | { type: "usage"; llmCalls: number; models: string[]; degraded: boolean }
+  | {
+      type: "usage";
+      llmCalls: number;
+      models: string[];
+      degraded: boolean;
+      /** Human-readable record of anything that failed or fell back. */
+      notes: string[];
+    }
   | { type: "done"; ms: number }
   | { type: "error"; message: string };

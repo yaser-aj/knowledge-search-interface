@@ -32,7 +32,7 @@ export interface RunState {
   answer: string;
   streaming: boolean;
   verification: Verification | null;
-  usage: { llmCalls: number; models: string[]; degraded: boolean };
+  usage: { llmCalls: number; models: string[]; degraded: boolean; notes: string[] };
   /** Set when the verifier sent the graph back for another retrieval pass. */
   refined: string | null;
   error: string | null;
@@ -61,7 +61,7 @@ export function idleRun(): RunState {
     answer: "",
     streaming: false,
     verification: null,
-    usage: { llmCalls: 0, models: [], degraded: false },
+    usage: { llmCalls: 0, models: [], degraded: false, notes: [] },
     refined: null,
     error: null,
     ms: null,
@@ -106,6 +106,7 @@ function reduce(state: RunState, event: AskEvent): RunState {
           llmCalls: event.llmCalls,
           models: event.models,
           degraded: event.degraded,
+          notes: event.notes,
         },
       };
     case "done":

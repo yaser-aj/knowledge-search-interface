@@ -25,34 +25,36 @@ function refineNode(
   return { loops: (state.loops ?? 0) + 1, extraQueries: gaps };
 }
 
-function afterVerify(state: AskStateType): "refine" | typeof END {
+function afterVerify(state: AskStateType): "refineRetrieval" | typeof END {
   const verification = state.verification;
   if (!verification) return END;
   if ((state.loops ?? 0) >= MAX_RETRIEVAL_LOOPS) return END;
-  // Without a model, a second pass would repeat identical deterministic work.
-  if (!isConfigured()) return END;
+  // Without a working model, a second pass would repeat identical deterministic
+  // work and produce the same answer, so do not spend the requests.
+  if (!isConfigured() || state.usage.degraded) return END;
   if (verification.retrievalGaps.length === 0) return END;
 
   const unsupported = verification.claims.some((claim) => claim.verdict === "unsupported");
   const uncovered = verification.coverage.some((item) => !item.covered);
-  return unsupported || uncovered ? "refine" : END;
+  return unsupported || uncovered ? "refineRetrieval" : END;
 }
 
+// Node names must not collide with state channel names, hence the verb-first names.
 function buildGraph() {
   return new StateGraph(AskState)
-    .addNode("prime", primeNode)
-    .addNode("plan", planNode)
-    .addNode("retrieve", retrieveNode)
-    .addNode("write", writeNode)
-    .addNode("verify", verifyNode)
-    .addNode("refine", refineNode)
-    .addEdge(START, "prime")
-    .addEdge("prime", "plan")
-    .addEdge("plan", "retrieve")
-    .addEdge("retrieve", "write")
-    .addEdge("write", "verify")
-    .addConditionalEdges("verify", afterVerify, ["refine", END])
-    .addEdge("refine", "retrieve")
+    .addNode("primeContext", primeNode)
+    .addNode("planQuery", planNode)
+    .addNode("retrieveEvidence", retrieveNode)
+    .addNode("writeAnswer", writeNode)
+    .addNode("verifyAnswer", verifyNode)
+    .addNode("refineRetrieval", refineNode)
+    .addEdge(START, "primeContext")
+    .addEdge("primeContext", "planQuery")
+    .addEdge("planQuery", "retrieveEvidence")
+    .addEdge("retrieveEvidence", "writeAnswer")
+    .addEdge("writeAnswer", "verifyAnswer")
+    .addConditionalEdges("verifyAnswer", afterVerify, ["refineRetrieval", END])
+    .addEdge("refineRetrieval", "retrieveEvidence")
     .compile();
 }
 
@@ -61,6 +63,9 @@ type CompiledAskGraph = ReturnType<typeof buildGraph>;
 const globalCache = globalThis as unknown as { __ksiGraph?: CompiledAskGraph };
 
 export function getAskGraph(): CompiledAskGraph {
+  // Caching across dev hot-reloads would pin the node functions to stale module
+  // code, so only reuse the compiled graph in production. Compiling is cheap.
+  if (process.env.NODE_ENV !== "production") return buildGraph();
   globalCache.__ksiGraph ??= buildGraph();
   return globalCache.__ksiGraph;
 }

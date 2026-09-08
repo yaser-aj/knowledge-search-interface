@@ -226,6 +226,17 @@ export function ReasoningPanel({ run }: { run: RunState }) {
             {usage.models.join(" → ")}
           </p>
         ) : null}
+
+        {usage.notes.length > 0 ? (
+          <ul className="mt-2 space-y-1 border-t border-line pt-2">
+            {usage.notes.map((note, i) => (
+              <li key={`${note.slice(0, 30)}-${i}`} className="flex gap-1.5 text-[11px] text-warn">
+                <CircleAlert className="mt-0.5 size-3 shrink-0" />
+                <span className="leading-snug">{note}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </section>
 
       {run.refined ? (

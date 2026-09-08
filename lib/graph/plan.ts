@@ -14,11 +14,11 @@ import type {
   PlanFacet,
   QueryPlan,
 } from "../types";
-import { emit, withStage } from "./emit";
+import { emit, emitUsage, withStage } from "./emit";
 import { corpusDigest } from "./prime";
 import type { AskStateType } from "./state";
 
-const MAX_FACETS = 4;
+const MAX_FACETS = 3;
 const MAX_MODEL_EXPANSIONS = 16;
 const MAX_INDEX_EXPANSIONS = 6;
 const MAX_SUB_QUERIES_PER_FACET = 3;
@@ -64,25 +64,27 @@ interface RawPlan {
   mustCover: string[];
 }
 
-const SYSTEM_PROMPT = `You are the planning stage of a retrieval system that searches a fixed, private document library. You never answer the user's question — you decide what to look for.
+export const PLANNER_SYSTEM_PROMPT = `You are the planning stage of a retrieval system that searches a fixed, private document library. You never answer the user's question — you decide what to look for.
 
 Documents are found by embedding similarity and keyword matching, so a plan only works if it contains the words that plausibly appear in the text. A question can name a category while the documents only name its members.
 
-Break the question into 1-4 facets. A facet is one independent condition a passage could satisfy on its own. For each facet:
+Break the question into at most 3 facets. A facet is one independent condition a passage could satisfy on its own. Group related surface forms together — one facet for a whole category, never one facet per country, per synonym, or per candidate answer. For each facet:
 - "expansions": concrete surface forms likely to appear verbatim in a document. Expand categories into their members, acronyms into their full names and vice versa, places into countries and their major cities, roles into job titles, people into aliases, nicknames, surnames and honorifics, and concepts into their common synonyms and near-synonyms. Be generous and specific: 8-16 terms.
 - "subQueries": 1-3 sentences phrased the way a document would state the fact, not the way a user would ask for it.
 
-Worked example. Question: "a business headquartered somewhere in the GCC".
-One facet covers the corporate side, with expansions like company, firm, group, holding, headquarters, head office, HQ, registered office, incorporated.
-Another covers Gulf geography, with expansions like Saudi Arabia, Riyadh, Jeddah, Dammam, United Arab Emirates, UAE, Dubai, Abu Dhabi, Sharjah, Qatar, Doha, Kuwait, Kuwait City, Bahrain, Manama, Oman, Muscat, Gulf Cooperation Council.
+Worked example. Question: "a business headquartered somewhere in the GCC". Two facets are enough.
+The first covers the corporate side, with expansions like company, firm, group, holding, headquarters, head office, HQ, registered office, incorporated.
+The second covers all of Gulf geography in one facet, with expansions like Saudi Arabia, Riyadh, Jeddah, Dammam, United Arab Emirates, UAE, Dubai, Abu Dhabi, Sharjah, Qatar, Doha, Kuwait, Kuwait City, Bahrain, Manama, Oman, Muscat, Gulf Cooperation Council.
 The same reasoning applies to any question: never rely on the questioner's wording alone.
+
+Keep it compact. Do not restate the library contents, and do not explain your choices.
 
 An index vocabulary is provided. It lists terms that genuinely occur in the library. Prefer those when they fit the facet, but also add world-knowledge terms that are absent from it — a term missing from the list may still appear in the text.
 
 Reply with JSON only, no prose and no code fences:
 {"interpretation":"what the user is really asking, in one sentence","entityType":"organization|person|place|event|concept|mixed","answerShape":"short_fact|list|explanation|comparison","facets":[{"label":"short name","intent":"what a passage satisfying this facet would contain","expansions":["..."],"subQueries":["..."]}],"mustCover":["what a complete answer must state"]}`;
 
-function buildUserPrompt(state: AskStateType): string {
+export function buildPlannerUserPrompt(state: AskStateType): string {
   const shortlist = state.prime?.vocabularyShortlist ?? [];
   const vocabulary =
     shortlist.length > 0
@@ -295,10 +297,10 @@ async function llmPlan(
   usage: LlmUsage,
 ): Promise<QueryPlan | null> {
   const raw = await chatText({
-    system: SYSTEM_PROMPT,
-    user: buildUserPrompt(state),
+    system: PLANNER_SYSTEM_PROMPT,
+    user: buildPlannerUserPrompt(state),
     usage,
-    maxTokens: 1400,
+    maxTokens: 2600,
     label: "plan",
   });
 
@@ -348,16 +350,10 @@ export async function planNode(
     if (!plan) {
       usage.degraded = true;
       plan = await corpusOnlyPlan(state.question);
-      plan.notes = [...usage.notes];
     }
 
     emit(config, { type: "plan", plan });
-    emit(config, {
-      type: "usage",
-      llmCalls: usage.calls,
-      models: usage.models,
-      degraded: usage.degraded,
-    });
+    emitUsage(config, usage);
     return { plan, usage };
   });
 }

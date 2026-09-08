@@ -3,7 +3,7 @@ import type { LangGraphRunnableConfig } from "@langchain/langgraph";
 import { chatStream, isConfigured } from "../llm";
 import { snippetOf } from "../text";
 import type { AnswerShape, RetrievedPassage } from "../types";
-import { emit, withStage } from "./emit";
+import { emit, emitUsage, withStage } from "./emit";
 import type { AskStateType } from "./state";
 
 const MAX_PASSAGE_CHARS = 1400;
@@ -114,12 +114,7 @@ export async function writeNode(
 
         if (answer.trim()) {
           emit(config, { type: "answer", text: answer });
-          emit(config, {
-            type: "usage",
-            llmCalls: usage.calls,
-            models: usage.models,
-            degraded: usage.degraded,
-          });
+          emitUsage(config, usage);
           return { answer, usage };
         }
         usage.notes.push("write: model returned an empty answer; showing the evidence instead.");
@@ -136,12 +131,7 @@ export async function writeNode(
     const answer = extractiveAnswer(state);
     emit(config, { type: "token", text: answer });
     emit(config, { type: "answer", text: answer });
-    emit(config, {
-      type: "usage",
-      llmCalls: usage.calls,
-      models: usage.models,
-      degraded: usage.degraded,
-    });
+    emitUsage(config, usage);
     return { answer, usage };
   });
 }
