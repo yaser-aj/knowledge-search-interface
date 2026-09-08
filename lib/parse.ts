@@ -1,36 +1,66 @@
-import { chunkText, type TextChunk } from "./chunk";
+import path from "node:path";
 
-const ALLOWED = new Set(["application/pdf", "text/plain", "text/markdown"]);
+import { collapseWhitespace } from "./text";
 
-export function mimeFor(filename: string, fallback: string): string {
-  const lower = filename.toLowerCase();
-  if (lower.endsWith(".pdf")) return "application/pdf";
-  if (lower.endsWith(".md") || lower.endsWith(".markdown")) return "text/markdown";
-  if (lower.endsWith(".txt")) return "text/plain";
-  return fallback;
+export interface ParsedPage {
+  /** 1-based page number for PDFs, null for formats without pagination. */
+  page: number | null;
+  text: string;
 }
 
-export function isAllowedFile(filename: string, mime: string): boolean {
-  const resolved = mimeFor(filename, mime);
-  return ALLOWED.has(resolved) || filename.toLowerCase().match(/\.(pdf|txt|md|markdown)$/) !== null;
+export interface ParsedDocument {
+  pages: ParsedPage[];
+  totalPages: number | null;
 }
 
-export async function parseAndChunk(filename: string, bytes: Buffer): Promise<TextChunk[]> {
-  const lower = filename.toLowerCase();
-  if (lower.endsWith(".pdf")) {
-    const { extractText } = await import("unpdf");
-    const { text } = await extractText(new Uint8Array(bytes), { mergePages: false });
-    const pages = Array.isArray(text) ? text : [text];
-    const chunks: TextChunk[] = [];
-    pages.forEach((pageText, i) => {
-      const pageChunks = chunkText(pageText ?? "", i + 1);
-      for (const chunk of pageChunks) {
-        chunks.push({ ...chunk, chunkIndex: chunks.length });
-      }
-    });
-    return chunks;
+export const SUPPORTED_EXTENSIONS = [".pdf", ".docx", ".txt", ".md", ".markdown"] as const;
+
+export function extensionOf(filename: string): string {
+  return path.extname(filename).toLowerCase();
+}
+
+export function isSupported(filename: string): boolean {
+  return (SUPPORTED_EXTENSIONS as readonly string[]).includes(extensionOf(filename));
+}
+
+async function parsePdf(buffer: Buffer): Promise<ParsedDocument> {
+  const { extractText } = await import("unpdf");
+  const { totalPages, text } = await extractText(new Uint8Array(buffer), {
+    mergePages: false,
+  });
+  const pages = text
+    .map((raw, i) => ({ page: i + 1, text: collapseWhitespace(raw) }))
+    .filter((page) => page.text.length > 0);
+  return { pages, totalPages };
+}
+
+async function parseDocx(buffer: Buffer): Promise<ParsedDocument> {
+  const mammoth = await import("mammoth");
+  const { value } = await mammoth.extractRawText({ buffer });
+  return { pages: [{ page: null, text: collapseWhitespace(value) }], totalPages: null };
+}
+
+export async function parseDocument(
+  filename: string,
+  buffer: Buffer,
+): Promise<ParsedDocument> {
+  const extension = extensionOf(filename);
+
+  switch (extension) {
+    case ".pdf":
+      return parsePdf(buffer);
+    case ".docx":
+      return parseDocx(buffer);
+    case ".txt":
+    case ".md":
+    case ".markdown":
+      return {
+        pages: [{ page: null, text: collapseWhitespace(buffer.toString("utf8")) }],
+        totalPages: null,
+      };
+    default:
+      throw new Error(
+        `Unsupported file type "${extension || filename}". Upload PDF, DOCX, TXT, or MD.`,
+      );
   }
-
-  const raw = bytes.toString("utf8");
-  return chunkText(raw);
 }

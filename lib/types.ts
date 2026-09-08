@@ -1,109 +1,180 @@
-export type DocumentStatus = "indexing" | "ready" | "error";
+export type DocumentStatus = "processing" | "ready" | "failed";
 
-export type NodeType = "retrieve" | "plan" | "write" | "verify";
-export type NodeStatus = "pending" | "running" | "done" | "failed" | "skipped";
-export type RunStatus = "running" | "completed" | "failed" | "insufficient";
-export type VerifyVerdict = "supported" | "weak" | "insufficient";
+export interface DocumentProfile {
+  /** Opening sentences, used to orient the planner about what the file covers. */
+  lede: string;
+  /** Most salient entities/keywords in this document. */
+  topTerms: string[];
+}
 
-export type DocumentRecord = {
-  id: number;
+export interface DocumentRecord {
+  id: string;
   filename: string;
-  storedName: string;
-  size: number;
-  mime: string;
+  extension: string;
+  bytes: number;
+  pages: number | null;
+  chunkCount: number;
+  wordCount: number;
   status: DocumentStatus;
   error: string | null;
-  chunkCount: number;
-  createdAt: number;
-};
+  createdAt: string;
+  profile: DocumentProfile;
+}
 
-export type ChunkRecord = {
-  id: number;
-  documentId: number;
-  filename: string;
-  chunkIndex: number;
+export interface Chunk {
+  id: string;
+  documentId: string;
+  index: number;
   page: number | null;
+  heading: string | null;
   text: string;
-  embedding: Float32Array;
-};
+}
 
-export type RetrievedPassage = {
-  chunkId: number;
-  documentId: number;
-  filename: string;
-  chunkIndex: number;
-  page: number | null;
-  text: string;
-  snippet: string;
-  score: number;
-  boostedScore: number;
-};
+export type VocabKind = "entity" | "keyword";
 
-export type Source = {
-  n: number;
-  documentId: number;
-  filename: string;
-  chunkId: number;
-  page: number | null;
-  score: number;
-  snippet: string;
-};
+export interface VocabTerm {
+  /** Lowercased lookup key. */
+  key: string;
+  /** Best-looking surface form seen in the corpus. */
+  term: string;
+  kind: VocabKind;
+  /** Number of documents containing the term. */
+  documentFrequency: number;
+  /** Total occurrences across the corpus. */
+  occurrences: number;
+  documentIds: string[];
+  chunkIds: string[];
+}
 
-export type PlanOutput = {
-  selectedChunkIds: number[];
-  insufficient: boolean;
+export interface CorpusStats {
+  documents: number;
+  chunks: number;
+  words: number;
+  vocabTerms: number;
+}
+
+/* ---------------------------------------------------------------- planning */
+
+export type EntityType =
+  | "organization"
+  | "person"
+  | "place"
+  | "event"
+  | "concept"
+  | "mixed";
+
+export type AnswerShape = "short_fact" | "list" | "explanation" | "comparison";
+
+export type ExpansionOrigin = "question" | "model" | "index";
+
+export interface ExpansionTerm {
+  term: string;
+  origin: ExpansionOrigin;
+  /** True when the term (or a very close variant) actually occurs in the corpus. */
+  inCorpus: boolean;
+  nearestCorpusTerm: string | null;
+  similarity: number | null;
+}
+
+export interface PlanFacet {
+  label: string;
   intent: string;
-  responseOutline: {
-    claims: string[];
-    documentsToCite: string[];
-    mustNotInclude: string[];
-    gaps: string;
-  };
-  rationale: string;
-  dropped: { chunkId: number; reason: string }[];
-};
+  expansions: ExpansionTerm[];
+  subQueries: string[];
+}
 
-export type VerifyOutput = {
-  verdict: VerifyVerdict;
-  notes: string;
-  flags: { claim: string; issue: "uncited" | "unsupported" | "off-outline" }[];
-};
+export interface QueryPlan {
+  interpretation: string;
+  entityType: EntityType;
+  answerShape: AnswerShape;
+  facets: PlanFacet[];
+  mustCover: string[];
+  /** "llm" when the planner model answered, "fallback" when it was unavailable. */
+  source: "llm" | "fallback";
+  notes: string[];
+}
 
-export type NodeRecord = {
-  id: number;
-  runId: number;
-  type: NodeType;
-  status: NodeStatus;
-  input: unknown;
-  output: unknown;
-  error: string | null;
-  model: string | null;
-  startedAt: number | null;
-  finishedAt: number | null;
-};
+/* --------------------------------------------------------------- retrieval */
 
-export type RunRecord = {
-  id: number;
-  question: string;
-  status: RunStatus;
-  createdAt: number;
-  helpful: number;
-};
+export interface PassageOrigin {
+  kind: "dense" | "lexical";
+  query: string;
+  facet: string;
+  rank: number;
+}
 
-export type RetrieveOutput = {
-  results: RetrievedPassage[];
-  nearMisses: RetrievedPassage[];
-  empty: boolean;
-};
+export interface RetrievedPassage {
+  chunkId: string;
+  documentId: string;
+  filename: string;
+  index: number;
+  page: number | null;
+  heading: string | null;
+  text: string;
+  snippet: string;
+  denseScore: number;
+  lexicalScore: number;
+  fusedScore: number;
+  /** Labels of the plan facets this passage satisfies. */
+  facetHits: string[];
+  matchedTerms: string[];
+  origins: PassageOrigin[];
+}
 
-export type WriteOutput = {
-  answer: string;
-  sources: Source[];
-};
+export interface RetrievalStats {
+  pass: number;
+  candidates: number;
+  denseQueries: number;
+  lexicalQueries: number;
+  returned: number;
+  ms: number;
+}
 
-export type PipelineEvent =
-  | { type: "run"; run: RunRecord }
-  | { type: "node"; node: NodeRecord }
-  | { type: "write_delta"; text: string }
-  | { type: "done"; run: RunRecord }
+/* ------------------------------------------------------------ verification */
+
+export type Verdict = "supported" | "partial" | "unsupported";
+
+export interface ClaimCheck {
+  claim: string;
+  verdict: Verdict;
+  /** 1-based source numbers as cited in the answer. */
+  sources: number[];
+  reason: string;
+}
+
+export interface CoverageCheck {
+  item: string;
+  covered: boolean;
+}
+
+export interface Verification {
+  claims: ClaimCheck[];
+  coverage: CoverageCheck[];
+  confidence: "high" | "medium" | "low";
+  retrievalGaps: string[];
+  summary: string;
+  source: "llm" | "heuristic";
+}
+
+/* ------------------------------------------------------------------ stream */
+
+export type StageName = "prime" | "plan" | "retrieve" | "write" | "verify";
+export type StageStatus = "running" | "done" | "error" | "skipped";
+
+export interface PrimeSummary {
+  corpus: CorpusStats;
+  /** Corpus vocabulary nearest the raw question, shown as "what the index knows". */
+  vocabularyShortlist: { term: string; similarity: number; documents: number }[];
+}
+
+export type AskEvent =
+  | { type: "stage"; stage: StageName; status: StageStatus; ms?: number; detail?: string }
+  | { type: "prime"; prime: PrimeSummary }
+  | { type: "plan"; plan: QueryPlan }
+  | { type: "retrieval"; passages: RetrievedPassage[]; stats: RetrievalStats }
+  | { type: "token"; text: string }
+  | { type: "answer"; text: string }
+  | { type: "verification"; verification: Verification }
+  | { type: "usage"; llmCalls: number; models: string[]; degraded: boolean }
+  | { type: "done"; ms: number }
   | { type: "error"; message: string };
