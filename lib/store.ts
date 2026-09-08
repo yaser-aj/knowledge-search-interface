@@ -27,6 +27,8 @@ interface Corpus {
 
 interface StoreCache {
   corpus: Corpus | null;
+  /** Bumped on every mutation so derived indexes know to rebuild. */
+  version: number;
   writeQueue: Promise<unknown>;
 }
 
@@ -34,6 +36,7 @@ interface StoreCache {
 const globalCache = globalThis as unknown as { __ksiStore?: StoreCache };
 const cache: StoreCache = (globalCache.__ksiStore ??= {
   corpus: null,
+  version: 0,
   writeQueue: Promise.resolve(),
 });
 
@@ -132,6 +135,11 @@ export function getCorpus(): Corpus {
 
 export function invalidateCorpus(): void {
   cache.corpus = null;
+  cache.version += 1;
+}
+
+export function corpusVersion(): number {
+  return cache.version;
 }
 
 export function listDocuments(): DocumentRecord[] {
@@ -162,6 +170,7 @@ export function upsertDocument(record: DocumentRecord): Promise<void> {
     next.push(record);
     await writeJsonAtomic(paths.index, next);
     corpus.documents = next;
+    cache.version += 1;
   });
 }
 
@@ -177,6 +186,7 @@ export function patchDocument(
     const next = corpus.documents.map((doc) => (doc.id === id ? updated : doc));
     await writeJsonAtomic(paths.index, next);
     corpus.documents = next;
+    cache.version += 1;
     return updated;
   });
 }
@@ -198,6 +208,7 @@ export function saveDocumentChunks(
       const vector = vectors[i];
       if (vector) corpus.chunks.push(hydrate(chunk, document.filename, vector));
     });
+    cache.version += 1;
   });
 }
 
@@ -208,6 +219,7 @@ export function saveVocabulary(terms: LoadedVocabTerm[]): Promise<void> {
     await writeJsonAtomic(paths.vocabIndex, plain);
     await writeFile(paths.vocabVectors, packVectors(terms.map((t) => t.vector)));
     getCorpus().vocab = terms;
+    cache.version += 1;
   });
 }
 
@@ -227,6 +239,7 @@ export function deleteDocument(id: string): Promise<boolean> {
       rm(paths.vectorFile(id), { force: true }),
       rm(paths.uploadFile(id, existing.extension), { force: true }),
     ]);
+    cache.version += 1;
     return true;
   });
 }
